@@ -2,5 +2,7 @@
 /frontend/dist/
 /backend/__pycache__/
 /backend/venv/
+/backend/uploads/
+/backend/pretrained_models/
 .DS_Store
 .env

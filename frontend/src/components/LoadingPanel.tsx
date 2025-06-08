@@ -6,46 +6,87 @@ interface Props {
 }
 
 export default function LoadingPanel({ file, onAnalysisDone }: Props) {
-  const [progress, setProgress] = useState(0);
-  const [msg, setMsg] = useState("Uploading and analyzing audio...");
+  const [msg, setMsg] = useState("Uploading audio...");
+  const [progress, setProgress] = useState(10);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
+    let pollInterval: ReturnType<typeof setInterval>;
 
-    async function uploadAndAnalyze() {
+    // Step 1: Upload and get jobid
+    async function upload() {
       setMsg("Uploading audio...");
-      setProgress(10);
+      setProgress(20);
       const formData = new FormData();
       formData.append("file", file);
-
       try {
         const response = await fetch("http://localhost:8000/upload-audio/", {
           method: "POST",
           body: formData,
         });
         if (!response.ok) throw new Error("Upload failed");
-        setMsg("Analyzing audio...");
-        setProgress(70);
+        const { jobid } = await response.json();
+        if (isCancelled) return;
+        setJobId(jobid);
+        setMsg("Queued for analysis...");
+        setProgress(35);
 
-        // Simulate backend analysis delay, replace with actual fetch if needed!
-        setTimeout(async () => {
-          if (isCancelled) return;
-          // Here, fetch your actual analysis result from the backend (mocked for now)
-          const analysisResult = { stems: ["Vocals", "Bass", "Drums"], hits: [0.4, 1.1, 2.3] };
-          setProgress(100);
-          setMsg("Analysis complete!");
-          setTimeout(() => onAnalysisDone(analysisResult), 600);
-        }, 1200);
+        // Step 2: Poll for status
+        pollInterval = setInterval(async () => {
+          try {
+            const res = await fetch(`http://localhost:8000/status/${jobid}`);
+            if (!res.ok) throw new Error("Polling error");
+            const stat = await res.json();
+            if (isCancelled) return;
 
-      } catch (err) {
-        setError("❌ Error uploading or analyzing audio.");
+            switch (stat.status) {
+              case "uploading":
+                setMsg("Uploading audio...");
+                setProgress(20);
+                break;
+              case "queued":
+                setMsg("Queued for analysis...");
+                setProgress(40);
+                break;
+              case "analyzing":
+                setMsg("Analyzing audio (extracting stems & beats)...");
+                setProgress(80);
+                break;
+              case "done":
+                setMsg("Analysis complete!");
+                setProgress(100);
+                clearInterval(pollInterval);
+                setTimeout(() => onAnalysisDone(stat.result), 800);
+                break;
+              case "error":
+                setError(`Error: ${stat.error || "Unknown error"}`);
+                setProgress(0);
+                clearInterval(pollInterval);
+                break;
+              default:
+                setMsg("Working...");
+                setProgress(50);
+                break;
+            }
+          } catch (err) {
+            setError("Error polling backend.");
+            clearInterval(pollInterval);
+          }
+        }, 1800);
+
+      } catch (err: any) {
+        setError("❌ Error uploading audio.");
         setProgress(0);
       }
     }
+    upload();
 
-    uploadAndAnalyze();
-    return () => { isCancelled = true; };
+    return () => {
+      isCancelled = true;
+      if (pollInterval) clearInterval(pollInterval);
+    };
     // eslint-disable-next-line
   }, [file, onAnalysisDone]);
 
@@ -83,12 +124,12 @@ export default function LoadingPanel({ file, onAnalysisDone }: Props) {
           width: `${progress}%`,
           height: "100%",
           background: "linear-gradient(90deg,#7B2FF2 60%,#A084E8 100%)",
-          transition: "width 0.5s cubic-bezier(.4,1,.3,1)"
+          transition: "width 0.6s cubic-bezier(.4,1,.3,1)"
         }} />
       </div>
       {error && <div style={{ color: "#D32F2F", fontWeight: 600 }}>{error}</div>}
-      <div style={{ marginTop: 20, color: "#ccc", fontSize: 13 }}>
-        Please wait, this may take a moment...
+      <div style={{ marginTop: 20, color: "#aaa", fontSize: 13 }}>
+        This can take a minute or two for big files.
       </div>
     </div>
   );
